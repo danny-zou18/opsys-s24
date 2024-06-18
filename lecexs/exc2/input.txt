@@ -1,0 +1,4 @@
+/* print parent PID value (which is obtained by
+* calling the getpid() system call)
+*/
+printf( "PARENT: my PID is %d\n", getpid() ); /* :-) :-( */
