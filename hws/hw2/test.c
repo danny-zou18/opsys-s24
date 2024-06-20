@@ -53,7 +53,6 @@ void addQueen(int **board, int m, int n, int row, int col) {
 int solveQueens(int **board, int row, int m, int n, int *pipefd) {
     // Base case: Solution Found
     if (row == m) {
-        printf("found a solution; notifying top-level parent\n");
         int queensPlaced = 0;
         for (int i = 0; i < m; i++) {
             for (int j = 0; j < n; j++) {
@@ -63,6 +62,13 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
             }
         }
         write(pipefd[1], &queensPlaced, sizeof(int));
+        // printSolution(board, m, n);
+        #ifndef QUIET
+            printf("found a solution; notifying top-level parent\n");
+        #endif
+        #ifndef NO_PARALLEL
+            
+        #endif
         return EXIT_SUCCESS;
     }
 
@@ -75,9 +81,6 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
 
     // If no valid moves left: Dead end no solution
     if (validMoves == 0) {
-        #ifndef QUIET
-        printf("P%d: dead end at row #%d; notifying top-level parent\n",
-               getpid(), row);
         int queensPlaced = 0;
         for (int i = 0; i < m; i++) {
             for (int j = 0; j < n; j++) {
@@ -87,15 +90,29 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
             }
         }
         write(pipefd[1], &queensPlaced, sizeof(int));
-        return EXIT_SUCCESS;
+        #ifndef QUIET
+        printf("P%d: dead end at row #%d; notifying top-level parent\n",
+               getpid(), row);
         #endif
+        return EXIT_SUCCESS;
     }
     // Else print possible amount of moves
     else {
-        printf("P%d: %d possible move%s at row #%d; creating %d child "
+        if (validMoves == m) {
+             printf("P%d: %d possible move%s at row #%d; creating %d child "
                "process%s...\n",
                getpid(), validMoves, validMoves == 1 ? "" : "s", row,
                validMoves, validMoves == 1 ? "" : "es");
+        } else {
+             #ifndef QUIET
+            printf("P%d: %d possible move%s at row #%d; creating %d child "
+               "process%s...\n",
+               getpid(), validMoves, validMoves == 1 ? "" : "s", row,
+               validMoves, validMoves == 1 ? "" : "es");
+            #endif
+        }
+        
+        // printSolution(board, m, n);
     }
 
     // Add Queens wherever possible
@@ -111,7 +128,7 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
             // fork failed
             fprintf(stderr, "Error: fork failed\n");
             free_board(board, m, pipefd);
-            abort();
+            abort();    
         }
         // Is child        
         else if (p == 0) {
@@ -123,59 +140,55 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
         }
         // Is parent
         else {
-            int status;
-            pid_t p_pid = waitpid(p, &status, 0);
-            if (p_pid == -1) {
-                fprintf(stderr, "P%d: waitpid failed!\n", getpid());
-                abort();
-            }
+            #ifdef NO_PARALLEL
+                int status;
+                pid_t p_pid = waitpid(p, &status, 0);
+                if (p_pid == -1) {
+                    fprintf(stderr, "P%d: waitpid failed!\n", getpid());
+                    abort();
+                }
 
-            if (WIFEXITED(status)) {
-                continue;
-            }   
-            else {
-                fprintf(stderr, "P%d: child process did not exit normally\n",
-                        getpid());
-                abort();
-            }
+                if (WIFEXITED(status)) {
+                    continue;
+                }   
+                else {
+                    fprintf(stderr, "P%d: child process did not exit normally\n",
+                            getpid());
+                    abort();
+                }
+            #endif
         }
     }
+
     return EXIT_SUCCESS;
 }
-
-
 
 int main(int argc, char **argv) {
     // Validate command-line arguments
     if (argc != 3) {
         fprintf(stderr, "ERROR: Invalid argument(s)\n");
-        fprintf(stderr, "USAGE: %s <m> <n>\n", *(argv + 0));
+        fprintf(stderr, "USAGE: hw2.out <m> <n>\n");
         return EXIT_FAILURE;
     }
-
     int m = atoi(*(argv + 1));
     int n = atoi(*(argv + 2));
-
     // Validate m and n
     if (m <= 0 || n <= 0) {
         fprintf(stderr, "ERROR: Invalid argument(s)\n");
-        fprintf(stderr, "USAGE: %s <m> <n>\n", *(argv + 0));
+        fprintf(stderr, "USAGE: hw2.out <m> <n>\n");
         return EXIT_FAILURE;
     }
-
     // Swap m and n if necessary
     if (n < m) {
         int temp = m;
         m = n;
         n = temp;
     }
-
     // Create the chess board
     int **board = calloc(m, sizeof(int *));
     for (int i = 0; i < m; i++) {
         *(board + i) = calloc(n, sizeof(int));
     }
-
     // pipe creation
     int *pipefd = calloc(2, sizeof(int));
     int ipc = pipe(pipefd);
@@ -183,14 +196,11 @@ int main(int argc, char **argv) {
         fprintf(stderr, "pipe() failed");
         return EXIT_FAILURE;
     }
-
     printf("P%d: solving the Abridged (m,n)-Queens problem for %dx%d board\n",
            getpid(), m, n);
     solveQueens(board, 0, m, n, pipefd);
     printf("P%d: search complete\n", getpid());
-
     close(pipefd[1]);
-
     // Read the pipe
     int queensPlaced;
     int *queensEndStates = calloc(m, sizeof(int));
@@ -200,19 +210,13 @@ int main(int argc, char **argv) {
     while (read(pipefd[0], &queensPlaced, sizeof(int)) > 0) {
         (*(queensEndStates + (queensPlaced - 1)))++;
     }
-
     for (int i = 1; i <= m; i++) {
         printf("P%d: number of %d-Queen end-states: %d\n", getpid(), i, *(queensEndStates+(i - 1)));
     }
-
     free(queensEndStates);
-
     // free heap
     close(ipc);
     close(ipc + 1);
     free_board(board, m, pipefd);
-
-
     return EXIT_SUCCESS;
-
 }
