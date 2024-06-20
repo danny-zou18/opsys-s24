@@ -66,10 +66,7 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
         #ifndef QUIET
             printf("found a solution; notifying top-level parent\n");
         #endif
-        #ifndef NO_PARALLEL
-            
-        #endif
-        return EXIT_SUCCESS;
+        exit(EXIT_SUCCESS);
     }
 
     // Counts Valid Moves
@@ -94,11 +91,12 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
         printf("P%d: dead end at row #%d; notifying top-level parent\n",
                getpid(), row);
         #endif
-        return EXIT_SUCCESS;
+        exit(EXIT_SUCCESS);
+        
     }
     // Else print possible amount of moves
     else {
-        if (validMoves == m) {
+        if (row == 0) {
              printf("P%d: %d possible move%s at row #%d; creating %d child "
                "process%s...\n",
                getpid(), validMoves, validMoves == 1 ? "" : "s", row,
@@ -164,6 +162,7 @@ int solveQueens(int **board, int row, int m, int n, int *pipefd) {
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     // Validate command-line arguments
     if (argc != 3) {
         fprintf(stderr, "ERROR: Invalid argument(s)\n");
@@ -198,22 +197,31 @@ int main(int argc, char **argv) {
     }
     printf("P%d: solving the Abridged (m,n)-Queens problem for %dx%d board\n",
            getpid(), m, n);
-    solveQueens(board, 0, m, n, pipefd);
-    printf("P%d: search complete\n", getpid());
-    close(pipefd[1]);
-    // Read the pipe
-    int queensPlaced;
-    int *queensEndStates = calloc(m, sizeof(int));
-    for (int i = 0; i < m; i++) {
-        *(queensEndStates+i) = 0;
+
+    pid_t p = fork();
+
+    if (p == 0) {
+        // close(pipefd[0]);
+        solveQueens(board, 0, m, n, pipefd);
+    } else {
+        waitpid(p, NULL, 0);
+        close(pipefd[1]);
+        printf("P%d: search complete\n", getpid());
+        // Read the pipe
+        int queensPlaced;
+        int *queensEndStates = calloc(m, sizeof(int));
+        for (int i = 0; i < m; i++) {
+            *(queensEndStates+i) = 0;
+        }
+        while (read(pipefd[0], &queensPlaced, sizeof(int)) > 0) {
+            (*(queensEndStates + (queensPlaced - 1)))++;
+        }
+        for (int i = 1; i <= m; i++) {
+            printf("P%d: number of %d-Queen end-states: %d\n", getpid(), i, *(queensEndStates+(i - 1)));
+        }
+        free(queensEndStates);
     }
-    while (read(pipefd[0], &queensPlaced, sizeof(int)) > 0) {
-        (*(queensEndStates + (queensPlaced - 1)))++;
-    }
-    for (int i = 1; i <= m; i++) {
-        printf("P%d: number of %d-Queen end-states: %d\n", getpid(), i, *(queensEndStates+(i - 1)));
-    }
-    free(queensEndStates);
+    
     // free heap
     close(ipc);
     close(ipc + 1);
