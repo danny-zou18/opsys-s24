@@ -1,59 +1,45 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <unistd.h>
 #include <ctype.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <string.h>
 
-// Function to calculate the hash value for a word
-int hash(const char* word, int cache_size) {
-    int sum = 0;
-    for (int i = 0; i < strlen(word); i++) {
-        sum += *(word + i);
-    }
-    return sum % cache_size;
-}
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "ERROR: Insufficient command-line arguments\n");
-        return 1;
+        fprintf(stderr, "Wrong number of arguments\n");
+        exit(EXIT_FAILURE);
     }
-
     int cache_size = atoi(*(argv + 1));
     if (cache_size <= 0) {
-        fprintf(stderr, "ERROR: Invalid cache size\n");
-        return 1;
+        fprintf(stderr, "ERROR: Invalid Cache Size\n");
+        exit(EXIT_FAILURE);
     }
-
-    // Dynamically allocate the cache array
     char** cache = calloc(cache_size, sizeof(char*));
     if (cache == NULL) {
-        fprintf(stderr, "ERROR: Failed to allocate memory for cache\n");
-        return 1;
+        fprintf(stderr, "ERROR: Could not allocate memory for Cache\n");
+        exit(EXIT_FAILURE);
     }
-
-    // Process each input file
     for (int i = 2; i < argc; i++) {
         int file = open(*(argv+i), O_RDONLY);
         if (file == -1) {
-            fprintf(stderr, "ERROR: Failed to open file %s\n", *(argv+i));
+            fprintf(stderr, "ERROR: Error opening file\n");
             continue;
-        }
-
+        } 
         char c;
-        ssize_t bytes_read;
+        ssize_t bytesRead;
         int word_length = 0;
         char* new_word = NULL;
-        while ((bytes_read = read(file, &c, 1)) > 0) {
+        while((bytesRead=read(file, &c, 1))>0) {
             if (c == ' ' || !isalnum(c)) {
-                if (word_length > 0) {  // Only construct new_word if word_length > 0
+               if (word_length > 0) {
                     new_word = realloc(new_word, word_length + 1);
                     if (new_word == NULL) {
-                        fprintf(stderr, "ERROR: Memory allocation failed\n");
-                        return 1; // Or handle the error as needed
+                        fprintf(stderr, "ERROR: Memory Allocation Error\n");
+                        exit(EXIT_FAILURE);
                     }
-                    *(new_word+word_length) = '\0';
+                    *(new_word + word_length) = '\0';
                     word_length = 0;  // Reset word_length for the next word
                     int index = hash(new_word, cache_size);
                     if (strlen(new_word) >= 3 && isalnum(*new_word)) {
@@ -73,21 +59,21 @@ int main(int argc, char** argv) {
                         strcpy(*(cache + index), new_word);
                     }
                     free(new_word);
-                }
+               }
             } else {
                 if (word_length == 0) {
                     new_word = calloc(1, sizeof(char));
-                    *(new_word+word_length) = c;
+                    *(new_word + word_length) = c;
                     if (new_word == NULL) {
-                        fprintf(stderr, "ERROR: Memory allocation failed\n");
-                        return 1; // Or handle the error as needed
+                        fprintf(stderr, "ERROR: Memory Allocation Error\n");
+                        exit(EXIT_FAILURE);
                     }
                 } else {
-                    new_word = realloc(new_word, word_length + 1);
-                    *(new_word+word_length) = c;
+                    new_word = realloc(new_word, (word_length+1) *sizeof(char));
+                    *(new_word + word_length) = c;
                     if (new_word == NULL) {
-                        fprintf(stderr, "ERROR: Memory allocation failed\n");
-                        return 1; // Or handle the error as needed
+                        fprintf(stderr, "ERROR: Memory Allocation Error\n");
+                        exit(EXIT_FAILURE);
                     }
                 }
                 word_length++;
@@ -119,9 +105,10 @@ int main(int argc, char** argv) {
                 strcpy(*(cache + index), new_word);
             }
             free(new_word);
-        }
+        
         close(file);
     }
+
     printf("\n");
     // Display the contents of the cache
     printf("Cache:\n");
@@ -136,5 +123,5 @@ int main(int argc, char** argv) {
     }
     free(cache);
 
-    return 0;
+    return EXIT_SUCCESS;
 }
