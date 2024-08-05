@@ -132,7 +132,7 @@ void *handle_client(void *arg) {
     int valread;
 
     // Select a random word
-    int word_index = rand();
+    int word_index = rand() % total_words;
     char *hidden_word = words[word_index];
     int guesses_left = MAX_GUESSES;
     int game_won = 0;
