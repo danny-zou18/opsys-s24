@@ -203,11 +203,7 @@ void *handle_client(void *arg) {
                 break;
             }
         } else {
-            char result[6] = {0};
-            for (int i = 0; i < MAX_WORD_LENGTH; i++) {
-                result[i] = '?';
-            }
-            strncpy(response + 3, result, MAX_WORD_LENGTH);
+            strncpy(response + 3, "?????", MAX_WORD_LENGTH);
             printf("THREAD %lu: invalid guess; sending reply: ????? (%d guesses left)\n", pthread_self(), guesses_left);
         }
         
