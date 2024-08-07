@@ -16,6 +16,9 @@ extern int total_guesses;
 extern int total_wins;
 extern int total_losses;
 extern char **words;
+
+char **all_words;
+int current_index;
 int total_words;
 
 pthread_mutex_t lock;
@@ -48,6 +51,8 @@ int wordle_server( int argc, char ** argv ) {
     total_wins = 0;
     total_losses = 0;
 
+    all_words = calloc(num_words + 1, sizeof(char *));
+
     words = calloc(num_words + 1, sizeof(char *));
 
     FILE *file = fopen(dictionary_filename, "r");
@@ -57,14 +62,14 @@ int wordle_server( int argc, char ** argv ) {
     }
 
     for (int i = 0; i < num_words; i++) {
-        *(words+i) = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
-        if (fscanf(file, "%5s", *(words+i)) != 1) {
+        *(all_words+i) = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
+        if (fscanf(file, "%5s", *(all_words+i)) != 1) {
             perror("ERROR: Failed to read word from dictionary file");
             fclose(file);
             exit(EXIT_FAILURE);
         }
         // Convert word to lowercase
-        for (char *p = *(words+i); *p; p++) *p = tolower(*p);
+        for (char *p = *(all_words+i); *p; p++) *p = tolower(*p);
     }
     fclose(file);
 
@@ -120,10 +125,16 @@ int wordle_server( int argc, char ** argv ) {
     }
 
     pthread_mutex_destroy(&lock);
+    for (int i = 0; *(all_words+i) != NULL; i++) {
+        free(*(all_words+i));
+    }
+    free(all_words);
+
     for (int i = 0; *(words+i) != NULL; i++) {
         free(*(words+i));
     }
     free(words);
+
     close(server_fd);
     
     return EXIT_SUCCESS;
@@ -140,11 +151,15 @@ void *handle_client(void *arg) {
 
     // Select a random word
     int word_index = rand() % total_words;
-    char *hidden_word = *(words+word_index);
+    char *hidden_word = *(all_words+word_index);
     int guesses_left = MAX_GUESSES;
     int game_won = 0;
 
-    printf("THREAD %lu: selected word: %s\n", pthread_self(), hidden_word);
+    *(words+current_index) = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
+    char *hidden_word_copy = strdup(hidden_word);
+    for (char *p = hidden_word_copy; *p; p++) *p = toupper(*p);
+    strncpy(*(words+current_index), hidden_word_copy, MAX_WORD_LENGTH);
+    current_index++;
     
     while ((valread = read(client_sock, buffer, MAX_WORD_LENGTH)) > 0) {
         *(buffer+valread) = '\0';
@@ -155,7 +170,7 @@ void *handle_client(void *arg) {
         
         // Validate the guess
         int valid_guess = 0;
-        for (char **ptr = words; *ptr; ptr++) {
+        for (char **ptr = all_words; *ptr; ptr++) {
             if (strcmp(*ptr, buffer) == 0) {
                 valid_guess = 1;
                 break;
@@ -191,19 +206,27 @@ void *handle_client(void *arg) {
             }
             
             strncpy(response + 3, result, MAX_WORD_LENGTH);
-            printf("THREAD %lu: sending reply: %s (%d guesses left)\n", pthread_self(), result, guesses_left);
-            
+            if (guesses_left == 1) {
+                printf("THREAD %lu: sending reply: %s (%d guess left)\n", pthread_self(), result, guesses_left);
+            } else {
+                printf("THREAD %lu: sending reply: %s (%d guesses left)\n", pthread_self(), result, guesses_left);
+            }
             char* lowercased_result = malloc(MAX_WORD_LENGTH + 1);
             for (int i = 0; i < MAX_WORD_LENGTH; i++) {
                 *(lowercased_result+i) = tolower(*(result+i));
             }
             *(lowercased_result+MAX_WORD_LENGTH) = '\0';
 
+            pthread_mutex_lock(&lock);
+            total_guesses++;
+            pthread_mutex_unlock(&lock);
+
             if (strcmp(lowercased_result, hidden_word) == 0) {
                 game_won = 1;
                 pthread_mutex_lock(&lock);
                 total_wins++;
                 pthread_mutex_unlock(&lock);
+                send(client_sock, response, 8, 0);
                 break;
             }
         } else {
@@ -212,14 +235,14 @@ void *handle_client(void *arg) {
                 *(result+i) = '?';
             }
             strncpy(response + 3, result, MAX_WORD_LENGTH);
-            printf("THREAD %lu: invalid guess; sending reply: ????? (%d guesses left)\n", pthread_self(), guesses_left);
+            if (guesses_left == 1) {
+                printf("THREAD %lu: invalid guess; sending reply: ????? (%d guess left)\n", pthread_self(), guesses_left);
+            } else {
+                printf("THREAD %lu: invalid guess; sending reply: ????? (%d guesses left)\n", pthread_self(), guesses_left);
+            }
         }
         
         send(client_sock, response, 8, 0);
-        
-        pthread_mutex_lock(&lock);
-        total_guesses++;
-        pthread_mutex_unlock(&lock);
         
         if (guesses_left == 0) {
             pthread_mutex_lock(&lock);
@@ -229,10 +252,15 @@ void *handle_client(void *arg) {
         }
     }
     
+    for (char *p = hidden_word; *p; p++) *p = toupper(*p);
     if (game_won || guesses_left == 0) {
         printf("THREAD %lu: game over; word was %s!\n", pthread_self(), hidden_word);
     } else if (guesses_left > 0) {
         printf("THREAD %lu: client gave up; closing TCP connection...\n", pthread_self());
+        printf("THREAD %lu: game over; word was %s!\n", pthread_self(), hidden_word);
+        pthread_mutex_lock(&lock);
+        total_losses++;
+        pthread_mutex_unlock(&lock);
     }
 
     close(client_sock);
@@ -241,8 +269,17 @@ void *handle_client(void *arg) {
 
 void cleanup_server(int signo) {
     printf("MAIN: SIGUSR1 rcvd; Wordle server shutting down...\n");
+    printf("MAIN:MAIN: valid guesses: %d\n", total_guesses);
+    printf("MAIN:MAIN: win/loss: %d/%d\n", total_wins, total_losses);
+    for (int i = 0; i < current_index; i++) {
+        printf("MAIN:MAIN: word #%d: %s\n", i+1, *(words+i));
+    }
     close(server_fd);
     pthread_mutex_destroy(&lock);
+    for (int i = 0; *(all_words+i) != NULL; i++) {
+        free(*(all_words+i));
+    }
+    free(all_words);
     for (int i = 0; *(words+i) != NULL; i++) {
         free(*(words+i));
     }
