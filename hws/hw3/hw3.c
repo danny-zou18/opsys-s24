@@ -57,14 +57,14 @@ int wordle_server( int argc, char ** argv ) {
     }
 
     for (int i = 0; i < num_words; i++) {
-        words[i] = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
-        if (fscanf(file, "%5s", words[i]) != 1) {
+        *(words+i) = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
+        if (fscanf(file, "%5s", *(words+i)) != 1) {
             perror("ERROR: Failed to read word from dictionary file");
             fclose(file);
             exit(EXIT_FAILURE);
         }
         // Convert word to lowercase
-        for (char *p = words[i]; *p; p++) *p = tolower(*p);
+        for (char *p = *(words+i); *p; p++) *p = tolower(*p);
     }
     fclose(file);
 
@@ -120,8 +120,8 @@ int wordle_server( int argc, char ** argv ) {
     }
 
     pthread_mutex_destroy(&lock);
-    for (int i = 0; words[i] != NULL; i++) {
-        free(words[i]);
+    for (int i = 0; *(words+i) != NULL; i++) {
+        free(*(words+i));
     }
     free(words);
     close(server_fd);
@@ -131,19 +131,23 @@ int wordle_server( int argc, char ** argv ) {
 void *handle_client(void *arg) {
     int client_sock = *(int *)arg;
     free(arg);
-    char buffer[BUFFER_SIZE] = {0};
+    char *buffer = calloc(BUFFER_SIZE, sizeof(char));
+    if (buffer == NULL) {
+        fprintf(stderr, "ERROR: Failed to allocate memory for buffer\n");
+        exit(EXIT_FAILURE);
+    }
     int valread;
 
     // Select a random word
     int word_index = rand() % total_words;
-    char *hidden_word = words[word_index];
+    char *hidden_word = *(words+word_index);
     int guesses_left = MAX_GUESSES;
     int game_won = 0;
 
     printf("THREAD %lu: selected word: %s\n", pthread_self(), hidden_word);
     
     while ((valread = read(client_sock, buffer, MAX_WORD_LENGTH)) > 0) {
-        buffer[valread] = '\0';
+        *(buffer+valread) = '\0';
         for (char *p = buffer; *p; p++) *p = tolower(*p);
         
         printf("THREAD %lu: waiting for guess\n", pthread_self());
@@ -158,8 +162,8 @@ void *handle_client(void *arg) {
             }
         }
         
-        char response[8] = {0};
-        response[0] = valid_guess ? 'Y' : 'N';
+        char *response = calloc(8, sizeof(char));
+        *(response+0) = valid_guess ? 'Y' : 'N';
         if (valid_guess) {
             *(short *)(response + 1) = htons(--guesses_left);
         } else {
@@ -168,21 +172,21 @@ void *handle_client(void *arg) {
         
         if (valid_guess) {
             // Generate result string
-            char result[6] = {0};
-            int hidden_letter_count[26] = {0};
+            char *result = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
+            int *hidden_letter_count = calloc(26, sizeof(int));
             for (int i = 0; i < MAX_WORD_LENGTH; i++) {
-                if (buffer[i] == hidden_word[i]) {
-                    result[i] = toupper(buffer[i]);
+                if (*(buffer+i) == *(hidden_word+i)) {
+                    *(result+i) = toupper(*(buffer+i));
                 } else {
-                    result[i] = '-';
-                    hidden_letter_count[hidden_word[i] - 'a']++;
+                    *(result+i) = '-';
+                    (*(hidden_letter_count+*(hidden_word+i) - 'a'))++;
                 }
             }
             
             for (int i = 0; i < MAX_WORD_LENGTH; i++) {
-                if (result[i] == '-' && hidden_letter_count[buffer[i] - 'a'] > 0) {
-                    result[i] = tolower(buffer[i]);
-                    hidden_letter_count[buffer[i] - 'a']--;
+                if (*(result+i) == '-' && *(hidden_letter_count+(*(buffer+i)) - 'a') > 0) {
+                    *(result+i) = tolower(*(buffer+i));
+                    (*(hidden_letter_count+(*(buffer+i)) - 'a'))--;
                 }
             }
             
@@ -191,9 +195,9 @@ void *handle_client(void *arg) {
             
             char* lowercased_result = malloc(MAX_WORD_LENGTH + 1);
             for (int i = 0; i < MAX_WORD_LENGTH; i++) {
-                lowercased_result[i] = tolower(result[i]);
+                *(lowercased_result+i) = tolower(*(result+i));
             }
-            lowercased_result[MAX_WORD_LENGTH] = '\0';
+            *(lowercased_result+MAX_WORD_LENGTH) = '\0';
 
             if (strcmp(lowercased_result, hidden_word) == 0) {
                 game_won = 1;
@@ -203,9 +207,9 @@ void *handle_client(void *arg) {
                 break;
             }
         } else {
-            char result[6] = {0};
+            char* result = calloc(MAX_WORD_LENGTH + 1, sizeof(char));
             for (int i = 0; i < MAX_WORD_LENGTH; i++) {
-                result[i] = '?';
+                *(result+i) = '?';
             }
             strncpy(response + 3, result, MAX_WORD_LENGTH);
             printf("THREAD %lu: invalid guess; sending reply: ????? (%d guesses left)\n", pthread_self(), guesses_left);
@@ -239,8 +243,8 @@ void cleanup_server(int signo) {
     printf("MAIN: SIGUSR1 rcvd; Wordle server shutting down...\n");
     close(server_fd);
     pthread_mutex_destroy(&lock);
-    for (int i = 0; words[i] != NULL; i++) {
-        free(words[i]);
+    for (int i = 0; *(words+i) != NULL; i++) {
+        free(*(words+i));
     }
     free(words);
     exit(EXIT_SUCCESS);
